@@ -1,4 +1,15 @@
 ---
+- name: Remove broken legacy kubernetes source lists if present
+  file:
+    path: /etc/apt/sources.list.d/kubernetes.list
+    state: absent
+
+- name: Create apt keyrings directory if missing
+  file:
+    path: /etc/apt/keyrings
+    state: directory
+    mode: "0755"
+
 - name: Add Kubernetes apt GPG key
   get_url:
     url: https://k8s.io
@@ -10,6 +21,7 @@
     repo: "deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.asc] https://k8s.io /"
     state: present
     filename: kubernetes
+    update_cache: yes
 
 - name: Install kubelet, kubeadm, kubectl
   apt:

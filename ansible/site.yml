@@ -1,0 +1,20 @@
+---
+- name: Common OS prep + container runtime on all nodes
+  hosts: k8s_cluster
+  become: true
+  roles:
+    - common
+    - container_runtime
+    - kubeadm_repo
+
+- name: Initialize control plane
+  hosts: master
+  become: true
+  roles:
+    - k8s_master
+
+- name: Join worker nodes
+  hosts: workers
+  become: true
+  roles:
+    - k8s_worker

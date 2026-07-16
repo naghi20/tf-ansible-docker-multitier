@@ -6,46 +6,50 @@ This repository delivers an end-to-end sandbox platform designed to help Cloud E
 
 The orchestration workflow provisions enterprise-grade, low-cost raw **AWS EC2 Compute Nodes via Terraform**, dynamic layout inventory maps, and launches structured **Ansible Playbooks** to wire up system dependencies, configure container engines, and configure a resilient, lightweight **Flannel CNI** control plane.
 
----
 
 ## 🏗️ Architecture Blueprint & Execution Pipeline
 
 The automated infrastructure environment lifecycle operates seamlessly across three operational phases:
 
-```text
-==========================================================================================
-1. DEPLOYMENT LAYER (LOCAL WORKSPACE)
-==========================================================================================
- [ Terraform Engine ]                         [ Ansible Automation Engine ]
-         │                                                 ▲
-         │ (Configures Core Hardware Pools)                 │ (Discovers Target Layout)
-         ▼                                                 │
- ┌──────────────────────┐                        ┌─────────┴───────────────┐
- │ AWS EC2 Computes     ├───────────────────────►│ Dynamic Inventory Map   │
- │ Security Ingresses   │  [Writes Topologies]   │ (ansible/inventory.ini) │
- └──────────────────────┘                        └─────────────────────────┘
-         │
-         ▼
-==========================================================================================
-2. INFRASTRUCTURE INSTANCE POOLS (AWS SECURITY REGION)
-==========================================================================================
- ┌──────────────────────────────────────────────────────────────────────────────────────┐
- │                     Isolated Lab Security Border (lab5-k8s-sg)                      │
- │                                                                                      │
- │  ┌───────────────────────────────────┐        ┌───────────────────────────────────┐  │
- │  │        MASTER CONTROL PLANE       │        │        WORKER COMPUTE NODES       │  │
- │  ├───────────────────────────────────┤        ├───────────────────────────────────┤  │
- │  │ • Containerd Engine Core          │        │ • Containerd Engine Core          │  │
- │  │ • Kubeadm Control Runtime         │◄──────►│ • Automated Join Execution        │  │
- │  │ • Flannel CNI Software Layer      │        │ • Scaled Application Deployments  │  │
- │  │ • CoreDNS Cluster Pods            │        │ • Production Ingress (Port 30080) │  │
- │  └───────────────────────────────────┘        └───────────────────────────────────┘  │
- └──────────────────────────────────────────────────────────────────────────────────────┘
++-----------------------------------------------------------------------------------+
+
+|                            LOCAL WORKSPACE (CONTROL NODE)                         |
+|                                                                                   |
+|   +-----------------------+                    +------------------------------+   |
+|   |   Terraform Engine    |                    |       Ansible Engine         |   |
+|   |                       |                    |                              |   |
+|   |  - Provisions EC2     |                    |  - Reads local inventory     |   |
+|   |  - Sets up Groups     |                    |  - Runs common system prep   |   |
+|   |  - Compiles inventory |──[Writes File]────►|  - Overrides Swap bounds     |   |
+|   +-----------┬-----------+   (inventory.ini)  +--------------┬---------------+   |
++---------------│-----------------------------------------------│-------------------+
+                │                                               │
+    [Spins up Infrastructure]                       [Configures via SSH]
+                │                                               │
+                ▼                                               ▼
++───────────────────────────────────────────────────────────────────────────────────+
+
+|                                  AWS TARGET VPC                                   |
+|                                                                                   |
+|      +----------------─────────────────────────────────────────────────────+      |
+|      |                  Isolated Security Group (lab5-k8s-sg)               |      |
+|      |                                                                     |      |
+|      |   +----------------------------+     +---------------------------+   |      |
+|      |   |  Master Control Plane      |     |    Worker Compute Nodes   |   |      |
+|      |   |                            |     |                           |   |      |
+|      |   |  - containerd runtime      |     |  - containerd runtime     |   |      |
+|      |   |  - kubelet (Swap allowed)  |◄───►|  - kubelet (Swap allowed) |   |      |
+|      |   |  - Flannel CNI Overlay     |     |  - 3x Nginx Pod Replicas  |   |      |
+|      |   |  - CoreDNS (10.244.0.0/16) |     |    (Exposed NodePort)     |   |      |
+|      |   +----------------------------+     +---------------------------+   |      |
+|      +--------------------------------─────────────────────────────────────+      |
++───────────────────────────────────────────────────────────────────────────────────+
                                                                      ▲
-==========================================================================================           │
-3. TRAFFIC INGRESS MANAGEMENT                                        │
-==========================================================================================           │
- [ Engineering Workstation Client ] ─────────────────────────────────┴── [ HTTP Ingress Access ]
+                                                                     │
+                                                       [External Client Requests]
+                                                       (Access via http://IP:30080)
+```
+
 ```
 
 1. **Declarative Cloud Provisioning (Terraform)**: Assembles decoupled AWS instances mapped over matching operational security boundaries, exposing internal interfaces for Kubernetes cluster transport and NodePort services.
@@ -56,29 +60,29 @@ The automated infrastructure environment lifecycle operates seamlessly across th
 
 ## 📁 Repository Blueprint Layout
 
-```text
+``
 .
-├── terraform/                  # Cloud Infrastructure Provisioning System
-│   ├── main.tf                 # Active AWS resources & inventory compilation hooks
-│   ├── variables.tf            # Scaling maps, compute tags, and regions
-│   └── outputs.tf              # Returns newly generated public endpoints
-├── ansible/                    # Configuration & Cluster Lifecycle Management
-│   ├── ansible.cfg             # Speed optimized setup profiles
-│   ├── requirements.yml        # Upstream community collection dependencies
-│   ├── site.yml                # Main execution blueprint entrypoint
-│   ├── generated/              # Cluster security credentials and configuration files
+├── terraform/                  # Infrastructure as Code Workspace
+│   ├── main.tf                 # EC2 Resource definitions & Inventory compiler
+│   ├── variables.tf            # Region, instance scaling, and key descriptors
+│   └── outputs.tf              # Returns newly generated public IPs
+├── ansible/                    # Configuration Management Engine
+│   ├── ansible.cfg             # Disables host checking for rapid cluster setup
+│   ├── requirements.yml        # Installs community.general modules
+│   ├── site.yml                # Playbook orchestrating the cluster rollout
+│   ├── generated/              # Local storage for dynamic join tokens & kubeconfig
 │   └── roles/
-│       ├── common/             # OS performance parameters & memory swapping limits
-│       ├── container_runtime/  # Installs containerd engine & cgroup systems
-│       ├── kubeadm_repo/       # Pins stable upstream Kubernetes mirrors
-│       ├── k8s_master/         # Initializes control engines & outputs credentials
-│       └── k8s_worker/         # Automates node cluster join operations
-└── k8s/                        # Native Kubernetes Production Objects
-    ├── deployment.yaml         # Scaled application configuration targets (Nginx)
-    └── service.yaml            # Exposes operational workloads on NodePort 30080
-```
+│       ├── common/             # Swap file creation, persistence, and kernel settings
+│       ├── container_runtime/  # Installs containerd & flips SystemdCgroup switch
+│       ├── kubeadm_repo/       # Configures upstream k8s apt software repos
+│       ├── k8s_master/         # Automates kubeadm init, flannel, and token extraction
+│       └── k8s_worker/         # Executes clean automated cluster entry joins
+└── k8s/                        # Native Kubernetes YAML Manifest Files
+    ├── deployment.yaml         # 3-replica Nginx application payload
+    └── service.yaml            # Exposes workload on NodePort 30080
+`
 
----
+
 
 ## 🛠️ Step-by-Step Production Run Guide
 
